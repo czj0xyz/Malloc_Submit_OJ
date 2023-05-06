@@ -18,4 +18,4 @@ clock.o: clock.c clock.h
 driverlib.o: driverlib.c driverlib.h
 
 clean:
-	rm -f *~ *.o code
+	rm -f *~ *.o code  
