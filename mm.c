@@ -41,7 +41,8 @@
 #define ALIGNMENT 8
 #define SKIP_SIZE 4
 #define WSIZE 4
-#define BARSIZE ((WSIZE<<1))
+#define LISTSIZE 4
+#define BARSIZE ((WSIZE<<1) + (LISTSIZE<<1))
 
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
@@ -50,6 +51,7 @@
 // #define SIZE_PTR(p)  ((size_t*)(((char*)(p)) - SIZE_T_SIZE))
 
 typedef unsigned int uint;
+typedef unsigned char uchar;
 
 #define GET_PTR_VAL(p) (*((uint*)(p)))
 #define PUT_PTR_VAL(p,val) ((*((uint*)(p))) = (val))
@@ -58,33 +60,32 @@ typedef unsigned int uint;
 
 #define GET_BLOCK_SIZE(p)  ((GET_PTR_VAL(p) & ~0x7))
 #define GET_BLOCK_STATE(p) ((GET_PTR_VAL(p) & 1))
-#define GET_PRE_BLOCK_STATE(p) ((GET_PTR_VAL(p) & 2)>>1)
+#define GET_PRE_BLOCK_STATE(p) (GET_BLOCK_STATE(GET_PRE_BLOCK_PTR(p)))
+#define GET_LISTPRE(p)  GET_TRUE_PTR(GET_PTR_VAL(GET_LISTPRE_PTR(p)))
+#define GET_LISTNEXT(p) GET_TRUE_PTR(GET_PTR_VAL(GET_LISTNEXT_PTR(p)))
+#define GET_PTR_UINT(p) ((uint)((size_t)(p) - (size_t)(mem_heap_lo())))
+#define GET_TRUE_PTR(p) ((uint*)((size_t)(p) + (size_t)(mem_heap_lo())))
 
-#define GET_NEXT_BLOCK_PTR(p) ((uint*)(((char*)(p)) + GET_BLOCK_SIZE(p)))
-#define GET_PRE_BLOCK_PTR(p) ((uint*)( ((char*)(p)) - GET_BLOCK_SIZE((char*)(p) - WSIZE) ))
-
-#define GET_RET_PTR(p) ((void*)((char*)(p) + WSIZE))
-#define GET_FOOTER_PTR(p) ((uint*)((char*)(p) + GET_BLOCK_SIZE(p) - WSIZE))
-#define GET_HEAD_PTR(p) ((uint*)((char*)(p) - WSIZE))
+#define GET_NEXT_BLOCK_PTR(p) ((uint*)(((uchar*)(p)) + GET_BLOCK_SIZE(p)))
+#define GET_PRE_BLOCK_PTR(p) ((uint*)( ((uchar*)(p)) - GET_BLOCK_SIZE((uchar*)(p) - WSIZE) ))
+#define GET_RET_PTR(p) ((void*)((uchar*)(p) + WSIZE + (LISTSIZE<<1)))
+#define GET_FOOTER_PTR(p) ((uint*)((uchar*)(p) + GET_BLOCK_SIZE(p) - WSIZE))
+#define GET_HEAD_PTR(p) ((uint*)((uchar*)(p) - WSIZE - (LISTSIZE<<1)))
+#define GET_LISTPRE_PTR(p) ((uint*)((uchar*)(p) + WSIZE))
+#define GET_LISTNEXT_PTR(p) ((uint*)((uchar*)(p) + WSIZE + WSIZE))
 
 #define END_BLOCK(p) (((long)GET_NEXT_BLOCK_PTR(p)) >= ((long)mem_heap_hi()))
+#define HEAP_ST (mem_heap_lo() + SKIP_SIZE)
 
+#define FREE_HEAD ((uint*)((uchar*)(mem_heap_lo())))
 
 /*
  * mm_init - Called when a new trace starts.
  */
-
-
-void* mm_heap_st(){
-	return mem_heap_lo() + SKIP_SIZE;
-}
-
-#define HEAP_SIZE 16
 int mm_init(void){
-	unsigned char *p = mem_sbrk(HEAP_SIZE + SKIP_SIZE);
+	uchar *p = mem_sbrk(SKIP_SIZE);
 	if((long)p < 0)return -1;
-	PUT_PTR_VAL(mm_heap_st(), HEAP_SIZE);
-	PUT_PTR_VAL(GET_FOOTER_PTR(mm_heap_st()), HEAP_SIZE);
+	PUT_PTR_VAL(FREE_HEAD,0);
 	return 0;
 }
 
@@ -92,57 +93,102 @@ int mm_init(void){
  * malloc - Allocate a block by incrementing the brk pointer.
  *      Always allocate a block whose size is a multiple of the alignment.
  */
-void use_block(unsigned char *p, uint size){
+void insert_block(uint *now){
+	/*
+		now->nex = head->nex;
+		head->nex->pre = now;
+		now->pre = head;
+		head->nex = now;
+	*/
+	PUT_PTR_VAL(GET_LISTNEXT_PTR(now), GET_PTR_VAL(FREE_HEAD));
+	if(GET_PTR_VAL(FREE_HEAD) != 0)
+		PUT_PTR_VAL(GET_LISTPRE_PTR(GET_TRUE_PTR(GET_PTR_VAL(FREE_HEAD))), GET_PTR_UINT(now));
+	PUT_PTR_VAL(GET_LISTPRE_PTR(now), GET_PTR_UINT(FREE_HEAD));
+	PUT_PTR_VAL(FREE_HEAD, GET_PTR_UINT(now));
+}
+ 
+void delete_block(uchar *p){
+	/*
+		p->nex->pre = head;
+		head->nex = p->nex;
+
+		p->pre->nex = p->nex
+		p->nex->pre = p->pre
+	*/
+	if(GET_LISTPRE(p) == FREE_HEAD){
+		if(GET_PTR_VAL(GET_LISTNEXT_PTR(p)) != 0){
+			PUT_PTR_VAL(GET_LISTPRE_PTR(GET_LISTNEXT(p)),  GET_PTR_UINT(FREE_HEAD));
+			PUT_PTR_VAL(FREE_HEAD, GET_PTR_VAL(GET_LISTNEXT_PTR(p)));
+		}else{
+			PUT_PTR_VAL(FREE_HEAD,0);
+		}
+	}else{
+		PUT_PTR_VAL(GET_LISTNEXT_PTR(GET_LISTPRE(p)),  GET_PTR_VAL(GET_LISTNEXT_PTR(p)));
+		if(GET_PTR_VAL(GET_LISTNEXT_PTR(p)) != 0)
+			PUT_PTR_VAL(GET_LISTPRE_PTR(GET_LISTNEXT(p)),  GET_PTR_VAL(GET_LISTPRE_PTR(p)));
+	}
+}
+
+void use_block(uchar *p, uint size){
 	uint bsize = GET_BLOCK_SIZE(p);
 	if(bsize < size + BARSIZE){
 		ADD_PTR_VAL(p, 1);
 		ADD_PTR_VAL(GET_FOOTER_PTR(p), 1);
-		if(!END_BLOCK(p)){
-			ADD_PTR_VAL(GET_NEXT_BLOCK_PTR(p), 2);
-			ADD_PTR_VAL(GET_FOOTER_PTR(GET_NEXT_BLOCK_PTR(p)), 2);
-		} 
+		delete_block(p);
 	}else{
-		uint val = size | 1 | (GET_PRE_BLOCK_STATE(p)<<1);
+		uint val = size | 1;
 		PUT_PTR_VAL(p, val);
 		PUT_PTR_VAL(GET_FOOTER_PTR(p), val);
+		delete_block(p);
 		uint* nex = GET_NEXT_BLOCK_PTR(p);
-		PUT_PTR_VAL(nex, (bsize - size) | 2);
+		PUT_PTR_VAL(nex, (bsize - size));
 		// printf("%p %p %p %ld %ld\n",p,nex,mem_heap_hi(),size,bsize);
-		PUT_PTR_VAL(GET_FOOTER_PTR(nex), (bsize - size) | 2);
+		PUT_PTR_VAL(GET_FOOTER_PTR(nex), (bsize - size));
+		insert_block(nex);
 	}
 }
 
-void merge_free_blocks(unsigned char *p, unsigned char *q){
+void merge_free_blocks(uchar *p, uchar *q){
 	uint val = GET_BLOCK_SIZE(p) + GET_BLOCK_SIZE(q);
-	val += (GET_PRE_BLOCK_STATE(p)<<1);
+	delete_block(q);
 	PUT_PTR_VAL(p, val);
 	PUT_PTR_VAL(GET_FOOTER_PTR(p), val);
 }
 
 void *malloc(size_t size){
+	// printf("malloc size=%ld\n",size);
 	assert(size > 0);
 	uint newsize = ALIGN(size + BARSIZE);
 	// printf("malloc size = %ld\n", newsize);
-	unsigned char *l = mm_heap_st();
-	for(; ; l = (unsigned char*)GET_NEXT_BLOCK_PTR(l)){
-		if(!GET_BLOCK_STATE(l)&&GET_BLOCK_SIZE(l) >= newsize){
-			use_block(l,newsize);
-			return GET_RET_PTR(l);
+	uint* now = FREE_HEAD;
+	uint* to;
+	if(GET_PTR_VAL(FREE_HEAD)!=0){
+		to = GET_TRUE_PTR(GET_PTR_VAL(FREE_HEAD));
+		if(GET_BLOCK_SIZE(to) >= newsize){
+			use_block((uchar*)to, newsize);
+			return GET_RET_PTR(to);
 		}
-		if(END_BLOCK(l))break;
+		for(now = to; GET_PTR_VAL(GET_LISTNEXT_PTR(now))!=0; now = to){
+			to = GET_LISTNEXT(now);
+			if(GET_BLOCK_SIZE(to) >= newsize){
+				use_block((uchar*)to, newsize);
+				return GET_RET_PTR(to);
+			}
+		}
 	}
-	unsigned char *p = mem_sbrk(newsize);
+	uchar *p = mem_sbrk(newsize);
 	if((long)p < 0) return NULL;
 	PUT_PTR_VAL(p, newsize);
 	PUT_PTR_VAL(GET_FOOTER_PTR(p), newsize);
-	if(!GET_BLOCK_STATE(l)){
-		merge_free_blocks(l,p);
-		use_block(l,newsize);
+	insert_block((uint*)p);
+	// printf("%d\n",(void*)p!=HEAP_ST);
+	if((void*)p!=HEAP_ST && !GET_BLOCK_STATE(GET_PRE_BLOCK_PTR(p))){
+		uint *l = GET_PRE_BLOCK_PTR(p);
+		merge_free_blocks((uchar*)l, p);
+		use_block((uchar*)l, newsize);
 		return GET_RET_PTR(l);
 	}else{
-		ADD_PTR_VAL(p, 2);
-		ADD_PTR_VAL(GET_FOOTER_PTR(p), 2);
-		use_block(p,newsize);
+		use_block(p, newsize);
 		return GET_RET_PTR(p);
 	}
 }
@@ -153,36 +199,24 @@ void *malloc(size_t size){
  */
 void free(void *ptr){
 	/*Get gcc to be quiet */
+	// printf("free ptr=%p\n",ptr);
 	if(ptr == NULL) return;
 	ptr = GET_HEAD_PTR(ptr);
-	// printf("free size = %p\n", ptr);
-	int flg = 0;
-	for(unsigned char *now = mm_heap_st(); ; now = (unsigned char *)GET_NEXT_BLOCK_PTR(now)){
-		if(((void*)now) == ptr && GET_BLOCK_STATE(ptr)){
-			flg = 1;
-			break;
-		}
-		if(END_BLOCK(now)) break;
-	}
-	// if(0x8000cece8==(long)ptr) mm_checkheap(0);
-	if(!flg)return;
-	DEL_PTR_VAL(ptr, 0x1);
+
+	// mm_checkheap(0);
+	DEL_PTR_VAL(ptr, 1);
 	PUT_PTR_VAL(GET_FOOTER_PTR(ptr), GET_PTR_VAL(ptr));
-	if((void*)ptr != mm_heap_st() && !GET_PRE_BLOCK_STATE(ptr)){
-		// mm_checkheap(0);
+	insert_block((uint*)ptr);
+	if((void*)ptr != HEAP_ST && !GET_PRE_BLOCK_STATE(ptr)){
 		uint* now = GET_PRE_BLOCK_PTR(ptr);
-		// printf("%p\n",(void*)now);
-		merge_free_blocks((unsigned char *)now,ptr);
+		merge_free_blocks((uchar *)now,ptr);
 		ptr = now;
 	}
 	if(!END_BLOCK(ptr)){
 		uint* nex = GET_NEXT_BLOCK_PTR(ptr);
-		DEL_PTR_VAL(nex, 0x2);
-		DEL_PTR_VAL(GET_FOOTER_PTR(nex), 0x2);
 		if(!GET_BLOCK_STATE(nex))
-			merge_free_blocks(ptr,(unsigned char *)nex);
+			merge_free_blocks(ptr,(uchar *)nex);
 	}
-	// if(0x8000cece8==(long)ptr) exit(0);//mm_checkheap(0);
 	// mm_checkheap(0);
 }
 
@@ -192,8 +226,7 @@ void free(void *ptr){
  *      to do better.
  */
 void *realloc(void *oldptr, size_t size){
-	// mm_checkheap(0);
-	// printf("realloc ptr=%p size=%ld\n", oldptr,size);
+	// printf("realloc oldptr=%p size=%ld\n",oldptr,size);
 	uint oldsize;
 	void *newptr;
 
@@ -221,14 +254,10 @@ void *realloc(void *oldptr, size_t size){
 	size = GET_BLOCK_SIZE(newptr) - BARSIZE;
 	oldsize = GET_BLOCK_SIZE(oldptr) - BARSIZE;
 	if(size < oldsize) oldsize = size;
-	// printf("%ld %ld\n", oldsize,size);
-	// printf("%p %p\n", (void *)newptr, (void *)oldptr);
-	// printf("--->%ld\n",oldsize);
 	memcpy(GET_RET_PTR(newptr) , GET_RET_PTR(oldptr) , oldsize);
-	// mm_checkheap(0);
   /* Free the old block. */
   	free(GET_RET_PTR(oldptr));
-	// mm_checkheap(0);
+
   	return GET_RET_PTR(newptr);
 }
 
@@ -255,18 +284,26 @@ void mm_checkheap(int verbose){
 	verbose = verbose;
 	if(verbose==0){
 		puts("---------");
-		for(unsigned char* p = mm_heap_st();;p = (unsigned char*)GET_NEXT_BLOCK_PTR(p)){
-			printf("--> %p state=%d size=%d pre_state=%d tali_size=%d\n"
-			, p, GET_BLOCK_STATE(p), GET_BLOCK_SIZE(p), GET_PRE_BLOCK_STATE(p), GET_BLOCK_SIZE(GET_FOOTER_PTR(p)));
+		printf("Rt=%p\n",FREE_HEAD);
+		printf("FREE_HEAD->%p\n",GET_TRUE_PTR(GET_PTR_VAL(FREE_HEAD)));
+		for(uchar* p = HEAP_ST;;p = (uchar*)GET_NEXT_BLOCK_PTR(p)){
+			printf("--> %p state=%d size=%d tali_size=%d pre=%d next=%d pre_ptr=%p next_ptr=%p\n"
+			, p, GET_BLOCK_STATE(p), GET_BLOCK_SIZE(p), GET_BLOCK_SIZE(GET_FOOTER_PTR(p)),
+			GET_PTR_VAL(GET_LISTPRE_PTR(p)),GET_PTR_VAL(GET_LISTNEXT_PTR(p)),
+			GET_LISTPRE(p),GET_LISTNEXT(p)
+			);
 			assert(GET_BLOCK_SIZE(p) > 0);
 			if(END_BLOCK(p)) break;
 		}
 		puts("---------");
 	}else{
 		puts("---------");
-		for(unsigned char* p = mm_heap_st();;p = (unsigned char*)GET_NEXT_BLOCK_PTR(p)){
+		printf("Rt=%p\n",FREE_HEAD);
+		for(uchar* p = HEAP_ST;;p = (uchar*)GET_NEXT_BLOCK_PTR(p)){
 			if(verbose == (long)p)
-			printf("--> %p state=%d size=%d pre_state=%d\n", p, GET_BLOCK_STATE(p), GET_BLOCK_SIZE(p), GET_PRE_BLOCK_STATE(p));
+				printf("--> %p state=%d size=%d tali_size=%d pre=%d next=%d\n"
+				, p, GET_BLOCK_STATE(p), GET_BLOCK_SIZE(p), GET_BLOCK_SIZE(GET_FOOTER_PTR(p)),
+				GET_PTR_VAL(GET_LISTPRE_PTR(p)),GET_PTR_VAL(GET_LISTNEXT_PTR(p)));
 			assert(GET_BLOCK_SIZE(p) > 0);
 			if(END_BLOCK(p)) break;
 		}
