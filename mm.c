@@ -221,11 +221,11 @@ void *malloc(size_t size){
 	PUT_PTR_VAL(GET_FOOTER_PTR(p), newsize);
 	insert_block((uint*)p);
 	if((void*)p!=HEAP_ST && !GET_BLOCK_STATE(GET_PRE_BLOCK_PTR(p))){
-		// uint *l = GET_PRE_BLOCK_PTR(p);
-		// merge_free_blocks((uchar*)l, p);
-		// use_block((uchar*)l, newsize);
-		use_block(p, newsize);
-		return GET_RET_PTR(p);
+		uint *l = GET_PRE_BLOCK_PTR(p);
+		merge_free_blocks((uchar*)l, p);
+		use_block((uchar*)l, newsize);
+		// use_block(p, newsize);
+		return GET_RET_PTR(l);
 	}else{
 		use_block(p, newsize);
 		return GET_RET_PTR(p);
