@@ -161,7 +161,6 @@ inline void use_block(uchar *p, uint size){
 		PUT_PTR_VAL(GET_FOOTER_PTR(p), size|1);
 		uint* nex = GET_NEXT_BLOCK_PTR(p);
 		PUT_PTR_VAL(nex, (bsize - size));
-		// printf("%p %p %p %ld %ld\n",p,nex,mem_heap_hi(),size,bsize);
 		PUT_PTR_VAL(GET_FOOTER_PTR(nex), (bsize - size));
 		insert_block(nex);
 	}
@@ -177,10 +176,8 @@ inline void merge_free_blocks(uchar *p, uchar *q){
 }
 
 void *malloc(size_t size){
-	// printf("malloc size=%ld\n",size);
 	assert(size > 0);
 	uint newsize = ALIGN(size + (WSIZE<<1));
-	// printf("malloc size = %ld\n", newsize);
 	for(size_t k=0; k<LISTNUM; k++){
 		if(k<LISTNUM-1 && (newsize>>LOG_ALIGNMENT) >= UPPER_BOUND(k))continue;
 		uint* now = FREE_HEAD(k);
@@ -213,7 +210,6 @@ void *malloc(size_t size){
 	PUT_PTR_VAL(p, newsize);
 	PUT_PTR_VAL(GET_FOOTER_PTR(p), newsize);
 	insert_block((uint*)p);
-	// printf("%d\n",(void*)p!=HEAP_ST);
 	if((void*)p!=HEAP_ST && !GET_BLOCK_STATE(GET_PRE_BLOCK_PTR(p))){
 		uint *l = GET_PRE_BLOCK_PTR(p);
 		merge_free_blocks((uchar*)l, p);
@@ -231,11 +227,9 @@ void *malloc(size_t size){
  */
 void free(void *ptr){
 	/*Get gcc to be quiet */
-	// printf("free ptr=%p\n",ptr);
 	if(ptr == NULL) return;
 	ptr = GET_HEAD_PTR(ptr);
 
-	// mm_checkheap(0);
 	DEL_PTR_VAL(ptr, 1);
 	PUT_PTR_VAL(GET_FOOTER_PTR(ptr), GET_PTR_VAL(ptr));
 	insert_block((uint*)ptr);
@@ -249,7 +243,6 @@ void free(void *ptr){
 		if(!GET_BLOCK_STATE(nex))
 			merge_free_blocks(ptr,(uchar *)nex);
 	}
-	// mm_checkheap(0);
 }
 
 /*
@@ -258,8 +251,6 @@ void free(void *ptr){
  *      to do better.
  */
 void *realloc(void *oldptr, size_t size){
-	// printf("realloc oldptr=%p size=%ld\n",oldptr,size);
-	// mm_checkheap(0);
 	uint oldsize;
 	void *newptr;
 
@@ -324,7 +315,6 @@ void *realloc(void *oldptr, size_t size){
  * calloc - Allocate the block and set it to zero.
  */
 void *calloc (size_t nmemb, size_t size){
-	// printf("calloc nmemb = %ld size = %ld\n", nmemb,size);
 	size_t bytes = nmemb * size;
 	void *newptr;
 
