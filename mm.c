@@ -86,7 +86,7 @@ typedef unsigned char uchar;
 
 
 #define CHUNK_SIZE (1<<12)
-#define LISTNUM 7
+#define LISTNUM 9
 #define UPPER_BOUND(k) (((size_t)1)<<(k+k+1))
 // #define UPPER_BOUND(k) (k<=30?k+2:((size_t)1)<<((k<<1)-55)) // LISTNUM 35
 // #define UPPER_BOUND(k) (k<=14?k+2:((size_t)1)<<((k<<1)-24)) // LISTNUM 19
@@ -96,17 +96,11 @@ typedef unsigned char uchar;
  */
 
 
-
-inline void insert_block(uint *now);
-
 int mm_init(void){
-	uchar *p = mem_sbrk(SKIP_SIZE + CHUNK_SIZE);
+	uchar *p = mem_sbrk(SKIP_SIZE);
 	if((long)p < 0)return -1;
 	for(int i=0;i<LISTNUM;i++)
 		PUT_PTR_VAL(FREE_HEAD(i),0);
-	PUT_PTR_VAL(HEAP_ST, CHUNK_SIZE);
-	PUT_PTR_VAL(GET_FOOTER_PTR(HEAP_ST), CHUNK_SIZE);
-	insert_block(HEAP_ST);
 	return 0;
 }
 
