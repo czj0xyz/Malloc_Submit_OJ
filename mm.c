@@ -86,7 +86,7 @@ typedef unsigned char uchar;
 
 
 #define LISTNUM 7
-#define UPPER_BOUND(k) (((size_t)1)<<(k+k+1))
+#define UPPER_BOUND(k) (((size_t)1)<<((k*3>>1)+1))
 // #define UPPER_BOUND(k) (k<=30?k+2:((size_t)1)<<((k<<1)-55)) // LISTNUM 35
 // #define UPPER_BOUND(k) (k<=14?k+2:((size_t)1)<<((k<<1)-24)) // LISTNUM 19
 
