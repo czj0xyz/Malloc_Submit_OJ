@@ -43,8 +43,8 @@
 #define SKIP_SIZE (LISTNUM<<2)
 #define WSIZE 4
 #define LISTSIZE 4
-#define LISTNUM 13
 #define BARSIZE ((WSIZE<<1) + (LISTSIZE<<1))
+#define LOG_LISTSIZE 2
 
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
@@ -77,12 +77,18 @@ typedef unsigned char uchar;
 #define GET_RET_PTR(p) ((void*)((uchar*)(p) + WSIZE))
 #define GET_HEAD_PTR(p) ((uint*)((uchar*)(p) - WSIZE))
 #define GET_LISTPRE_PTR(p) ((uint*)((uchar*)(p) + WSIZE))
-#define GET_LISTNEXT_PTR(p) ((uint*)((uchar*)(p) + WSIZE + WSIZE))
+#define GET_LISTNEXT_PTR(p) ((uint*)((uchar*)(p) + (WSIZE<<1)))
 
 #define END_BLOCK(p) (((long)GET_NEXT_BLOCK_PTR(p)) >= ((long)mem_heap_hi()))
 #define HEAP_ST (mem_heap_lo() + SKIP_SIZE)
 
-#define FREE_HEAD(k) ((uint*)((uchar*)(mem_heap_lo()) + (LISTSIZE * k)))
+#define FREE_HEAD(k) ((uint*)((uchar*)(mem_heap_lo()) + (k<<LOG_LISTSIZE)))
+
+
+#define LISTNUM 7
+#define UPPER_BOUND(k) (((size_t)1)<<(k+k+1))
+// #define UPPER_BOUND(k) (k<=30?k+2:((size_t)1)<<((k<<1)-55)) // LISTNUM 35
+// #define UPPER_BOUND(k) (k<=14?k+2:((size_t)1)<<((k<<1)-24)) // LISTNUM 19
 
 /*
  * mm_init - Called when a new trace starts.
@@ -99,7 +105,7 @@ int mm_init(void){
  * malloc - Allocate a block by incrementing the brk pointer.
  *      Always allocate a block whose size is a multiple of the alignment.
  */
-void insert_block(uint *now){
+inline void insert_block(uint *now){
 	/*
 		now->nex = head->nex;
 		head->nex->pre = now;
@@ -107,7 +113,7 @@ void insert_block(uint *now){
 		head->nex = now;
 	*/
 	size_t k = 0, sz = GET_BLOCK_SIZE(now)>>LOG_ALIGNMENT;
-	for(;k<LISTNUM-1&&sz>=(((size_t)1)<<(k+1));k++);
+	for(k=0;k<LISTNUM-1&&sz>=UPPER_BOUND(k);k++);
 
 	PUT_PTR_VAL(GET_LISTNEXT_PTR(now), GET_PTR_VAL(FREE_HEAD(k)));
 	if(GET_PTR_VAL(FREE_HEAD(k)) != 0)
@@ -116,7 +122,7 @@ void insert_block(uint *now){
 	PUT_PTR_VAL(FREE_HEAD(k), GET_PTR_UINT(now));
 }
  
-void delete_block(uchar *p){
+inline void delete_block(uchar *p){
 	/*
 		p->nex->pre = head;
 		head->nex = p->nex;
@@ -126,7 +132,7 @@ void delete_block(uchar *p){
 	*/
 	if((size_t)GET_LISTPRE(p) < (size_t)HEAP_ST){
 		size_t k = 0, sz = GET_BLOCK_SIZE(p)>>LOG_ALIGNMENT;
-		for(;k<LISTNUM-1&&sz>=(((size_t)1)<<(k+1));k++);
+		for(k=0;k<LISTNUM-1&&sz>=UPPER_BOUND(k);k++);
 		if(GET_PTR_VAL(GET_LISTNEXT_PTR(p)) != 0){
 			PUT_PTR_VAL(GET_LISTPRE_PTR(GET_LISTNEXT(p)),  GET_PTR_UINT(FREE_HEAD(k)));
 			PUT_PTR_VAL(FREE_HEAD(k), GET_PTR_VAL(GET_LISTNEXT_PTR(p)));
@@ -140,7 +146,7 @@ void delete_block(uchar *p){
 	}
 }
 
-void use_block(uchar *p, uint size){
+inline void use_block(uchar *p, uint size){
 	uint bsize = GET_BLOCK_SIZE(p);
 	if(bsize < size + BARSIZE){
 		ADD_PTR_VAL(p, 1);
@@ -158,7 +164,7 @@ void use_block(uchar *p, uint size){
 	}
 }
 
-void merge_free_blocks(uchar *p, uchar *q){
+inline void merge_free_blocks(uchar *p, uchar *q){
 	uint val = GET_BLOCK_SIZE(p) + GET_BLOCK_SIZE(q);
 	delete_block(q);
 	delete_block(p);
@@ -173,7 +179,7 @@ void *malloc(size_t size){
 	uint newsize = ALIGN(size + (WSIZE<<1));
 	// printf("malloc size = %ld\n", newsize);
 	for(size_t k=0; k<LISTNUM; k++){
-		if((newsize>>LOG_ALIGNMENT) >= (((size_t)1)<<(k+1)))continue;
+		if(k<LISTNUM-1 && (newsize>>LOG_ALIGNMENT) >= UPPER_BOUND(k))continue;
 		uint* now = FREE_HEAD(k);
 		uint* to;
 		if(GET_PTR_VAL(FREE_HEAD(k))!=0){
