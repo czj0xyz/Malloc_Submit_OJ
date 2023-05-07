@@ -175,6 +175,16 @@ inline void merge_free_blocks(uchar *p, uchar *q){
 	insert_block((uint*)p);
 }
 
+inline void merge_free_3blocks(uchar *p, uchar *q, uchar *r){
+	uint val = GET_BLOCK_SIZE(p) + GET_BLOCK_SIZE(q) + GET_BLOCK_SIZE(r);
+	delete_block(q);
+	delete_block(p);
+	delete_block(r);
+	PUT_PTR_VAL(p, val);
+	PUT_PTR_VAL(GET_FOOTER_PTR(p), val);
+	insert_block((uint*)p);
+}
+
 void *malloc(size_t size){
 	assert(size > 0);
 	uint newsize = ALIGN(size + (WSIZE<<1));
@@ -211,10 +221,11 @@ void *malloc(size_t size){
 	PUT_PTR_VAL(GET_FOOTER_PTR(p), newsize);
 	insert_block((uint*)p);
 	if((void*)p!=HEAP_ST && !GET_BLOCK_STATE(GET_PRE_BLOCK_PTR(p))){
-		uint *l = GET_PRE_BLOCK_PTR(p);
-		merge_free_blocks((uchar*)l, p);
-		use_block((uchar*)l, newsize);
-		return GET_RET_PTR(l);
+		// uint *l = GET_PRE_BLOCK_PTR(p);
+		// merge_free_blocks((uchar*)l, p);
+		// use_block((uchar*)l, newsize);
+		use_block(p, newsize);
+		return GET_RET_PTR(p);
 	}else{
 		use_block(p, newsize);
 		return GET_RET_PTR(p);
@@ -233,16 +244,13 @@ void free(void *ptr){
 	DEL_PTR_VAL(ptr, 1);
 	PUT_PTR_VAL(GET_FOOTER_PTR(ptr), GET_PTR_VAL(ptr));
 	insert_block((uint*)ptr);
-	if((void*)ptr != HEAP_ST && !GET_PRE_BLOCK_STATE(ptr)){
-		uint* now = GET_PRE_BLOCK_PTR(ptr);
-		merge_free_blocks((uchar *)now,ptr);
-		ptr = now;
-	}
-	if(!END_BLOCK(ptr)){
-		uint* nex = GET_NEXT_BLOCK_PTR(ptr);
-		if(!GET_BLOCK_STATE(nex))
-			merge_free_blocks(ptr,(uchar *)nex);
-	}
+	int flg_merge_pre = (void*)ptr != HEAP_ST && !GET_PRE_BLOCK_STATE(ptr);
+	int flg_merge_next = !END_BLOCK(ptr) && !GET_NEXT_BLOCK_STATE(ptr);
+
+	if(!flg_merge_pre && !flg_merge_next);
+	else if(flg_merge_pre && !flg_merge_next) merge_free_blocks((uchar*)GET_PRE_BLOCK_PTR(ptr),ptr);
+	else if(!flg_merge_pre && flg_merge_next) merge_free_blocks(ptr,(uchar*)GET_NEXT_BLOCK_PTR(ptr));
+	else merge_free_3blocks((uchar*)GET_PRE_BLOCK_PTR(ptr),ptr,(uchar*)GET_NEXT_BLOCK_PTR(ptr));
 }
 
 /*
@@ -268,37 +276,37 @@ void *realloc(void *oldptr, size_t size){
 
 	oldptr = GET_HEAD_PTR(oldptr);
 	oldsize = GET_BLOCK_SIZE(oldptr);
-	// size = ALIGN(size + (WSIZE<<1));
-	// if(oldsize >= size){
-	// 	if(oldsize < size + BARSIZE) return GET_RET_PTR(oldptr);
-	// 	PUT_PTR_VAL(oldptr, size|1);
-	// 	PUT_PTR_VAL(GET_FOOTER_PTR(oldptr), size|1);
-	// 	uint* nex = GET_NEXT_BLOCK_PTR(oldptr);
-	// 	PUT_PTR_VAL(nex, (oldsize - size));
-	// 	PUT_PTR_VAL(GET_FOOTER_PTR(nex), (oldsize - size));
-	// 	insert_block(nex);
-	// 	if(!END_BLOCK(nex) && !GET_NEXT_BLOCK_STATE(nex))
-	// 		merge_free_blocks((uchar*)nex,(uchar*)(GET_NEXT_BLOCK_PTR(nex)));
-	// 	return GET_RET_PTR(oldptr);
-	// }else{
-	// 	size_t sum_size = GET_BLOCK_SIZE(GET_NEXT_BLOCK_PTR(oldptr)) + oldsize;
-	// 	if(!END_BLOCK(oldptr) && !GET_NEXT_BLOCK_STATE(oldptr) && sum_size >= size){
-	// 		uint* nex = GET_NEXT_BLOCK_PTR(oldptr);
-	// 		delete_block((uchar*)nex);
-	// 		if(sum_size < size + BARSIZE){
-	// 			PUT_PTR_VAL(oldptr, sum_size|1);
-	// 			PUT_PTR_VAL(GET_FOOTER_PTR(oldptr), sum_size|1);
-	// 			return GET_RET_PTR(oldptr);
-	// 		}
-	// 		PUT_PTR_VAL(oldptr, size|1);
-	// 		PUT_PTR_VAL(GET_FOOTER_PTR(oldptr), size|1);
+	size = ALIGN(size + (WSIZE<<1));
+	if(oldsize >= size){
+		if(oldsize < size + BARSIZE) return GET_RET_PTR(oldptr);
+		PUT_PTR_VAL(oldptr, size|1);
+		PUT_PTR_VAL(GET_FOOTER_PTR(oldptr), size|1);
+		uint* nex = GET_NEXT_BLOCK_PTR(oldptr);
+		PUT_PTR_VAL(nex, (oldsize - size));
+		PUT_PTR_VAL(GET_FOOTER_PTR(nex), (oldsize - size));
+		insert_block(nex);
+		if(!END_BLOCK(nex) && !GET_NEXT_BLOCK_STATE(nex))
+			merge_free_blocks((uchar*)nex,(uchar*)(GET_NEXT_BLOCK_PTR(nex)));
+		return GET_RET_PTR(oldptr);
+	}else{
+		size_t sum_size = GET_BLOCK_SIZE(GET_NEXT_BLOCK_PTR(oldptr)) + oldsize;
+		if(!END_BLOCK(oldptr) && !GET_NEXT_BLOCK_STATE(oldptr) && sum_size >= size){
+			uint* nex = GET_NEXT_BLOCK_PTR(oldptr);
+			delete_block((uchar*)nex);
+			if(sum_size < size + BARSIZE){
+				PUT_PTR_VAL(oldptr, sum_size|1);
+				PUT_PTR_VAL(GET_FOOTER_PTR(oldptr), sum_size|1);
+				return GET_RET_PTR(oldptr);
+			}
+			PUT_PTR_VAL(oldptr, size|1);
+			PUT_PTR_VAL(GET_FOOTER_PTR(oldptr), size|1);
 
-	// 		nex = GET_NEXT_BLOCK_PTR(oldptr);
-	// 		PUT_PTR_VAL(nex, (sum_size - size));
-	// 		PUT_PTR_VAL(GET_FOOTER_PTR(nex), (sum_size - size));
-	// 		insert_block(nex);
-	// 		return GET_RET_PTR(oldptr);
-	// 	}else {
+			nex = GET_NEXT_BLOCK_PTR(oldptr);
+			PUT_PTR_VAL(nex, (sum_size - size));
+			PUT_PTR_VAL(GET_FOOTER_PTR(nex), (sum_size - size));
+			insert_block(nex);
+			return GET_RET_PTR(oldptr);
+		}else {
 			newptr = GET_HEAD_PTR(malloc(size));
 			if(!newptr) return 0;
 			size = GET_BLOCK_SIZE(newptr) - (WSIZE<<1);
@@ -307,8 +315,8 @@ void *realloc(void *oldptr, size_t size){
 			memcpy(GET_RET_PTR(newptr) , GET_RET_PTR(oldptr) , oldsize);
 			free(GET_RET_PTR(oldptr));
   			return GET_RET_PTR(newptr);
-	// 	}
-	// }
+		}
+	}
 }
 
 /*
